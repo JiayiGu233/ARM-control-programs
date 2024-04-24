@@ -1,0 +1,221 @@
+; ECE-222 Lab ... Winter 2013 term 
+; Lab 3 sample code 
+				THUMB 		; Thumb instruction set 
+                AREA 		My_code, CODE, READONLY
+                EXPORT 		__MAIN
+				ENTRY  
+__MAIN
+
+; The following lines are similar to Lab-1 but use a defined address to make it easier.
+; They just turn off all LEDs 
+				LDR			R10, =LED_BASE_ADR		; R10 is a permenant pointer to the base address for the LEDs, offset of 0x20 and 0x40 for the ports
+				MOV 		R3, #0xB0000000		; Turn off three LEDs on port 1  
+				STR 		R3, [r10, #0x20]
+				MOV 		R3, #0x0000007C
+				STR 		R3, [R10, #0x40] 	; Turn off five LEDs on port 2 
+
+				;BL 			COUNTER			; Call the Counter if this line is uncommented, otherwise run the reflexometer
+				
+; This line is very important in your main program
+; Initializes R11 to a 16-bit non-zero value and NOTHING else can write to R11 !!
+				
+				MOV			R11, #0xABCD		; Init the random number generator with a non-zero number
+loop 			BL 			RandomNum 			; call the reflexmeter which starts with randomNum subroutine
+				B loop
+
+;
+; Display the number in R3 onto the 8 LEDs
+DISPLAY_NUM		STMFD		R13!,{R1, R2, R3, R5, R6, R10, R14}		;push R1, R2, R3, R5, R6, R10, R14 to the callstack as they are modified and R14 is the LR
+
+; Usefull commaands:  RBIT (reverse bits), BFC (bit field clear), LSR & LSL to shift bits left and right, ORR & AND and EOR for bitwise operations
+				MOV			R5, #4					;Since the number is 32 bits, we need to display 8 bits 4 times total. We use this counter to loop 4 times before resetting to the beginning
+				MOV			R3, R2					; Store the number we want to display in R3 
+NEXT			AND			R1, R3, #0x000000FF		; Preserve only the least significant 2 bytes (last 8 bits) to display on the 8 leds
+				EOR			R1, #0xFF				; Flip all the bits in the number because the LEDS are active low (0 = turn on) 
+				RBIT		R1, R1					; Reverse the order of bits in the number so we can correctly display them on the board ( the leftmost LED for each port is the least significant of the bits for the port leds, but we want to display the most significant bit of the number, so we reverse the bits). 
+				LSR			R1, #24					; Shift the reversed value right 24 bits so the 8 bits we want are in the least significant 2 bytes again 
+				BFI			R6, R1, #28, #2			; Take the first two bits of R1 and store them in bit 28 and 29 of R6 (for LEDS 1.28 and 1.29)
+				LSR			R1, #2					; Shift right twice to discard the two already inserted bits ^
+				BFI			R6, R1, #31, #1			; Take the new first bit of R1 (the 3rd digit) and store it into bit 31 of R6 (for  LED 1.31)
+				STR 		R6, [r10, #0x20]		; Write R6 to port 1 to turn on/off the 3 port 1 LEDs to display the 3 most significant bits of the number
+				
+				LSR			R1, #1					; Shift right once to discard the bit we just inserted to R6
+				BFI		    R6,	R1, #2, #5			; Take the new first five bits of R1 and store them in bits 2 to 6 of R6 (for LEDS 2.2 to 2.6)
+				STR 		R6, [R10, #0x40]		; Write R6 to port 2 to turn on/off the five port 2 LEDS to display the 5 leftover bits of the number
+	     		MOV 		R0, #0XB0AB				; Initialize lower word/four bits of R0 for countdown 
+				MOVT 		R0, #0x0028 			; Initialize R0 upper word/four bits for countdown; 2.6 million loops to get 2 seconds delay time
+
+DISPLAY_DELAY	SUBS 		R0, #1 			; Decrement R0 by 1 and set the N,Z,C status bits
+		
+				BNE 		DISPLAY_DELAY	; If we are done delaying for 2 seconds we continue, if not we keep decrementing to reach the 2 second delay 
+				
+				LSR			R3, #8			; After displaying the least significant 8 bits, we shift 8 bits to get the next 8 bits in the least significant position 	
+				SUBS		R5, #1			; Indicates that we have displayed 8/32 bits of the number, which we do 4 times total 
+				BNE			NEXT			; If we have not finished displaying the bits, we go back to display the next 8 bits
+				
+	     		MOV 		R0, #0XB9AA     ; Initialize lower word/four bits of R0 for countdown 
+				MOVT 		R0, #0x0065 	; Initialize R0 upper word/four bits for countdown; at the end of the number, we add an additional 5 second delay, which is 6.67 million loops
+
+NUM_DELAY		SUBS 		R0, #1 			; Decrement R0 by 1 and set the N,Z,C status bits
+		
+				BNE 		NUM_DELAY		; If we are done delyaing for 5 seconds we continue, if not we keep decrementing to reach the 5 second delay
+
+				B			DISPLAY_NUM		; If we are done delaying for 5 seconds we branch back to the beginning of the subroutine to re-display the number 
+				
+				
+				LDMFD		R13!,{R1, R2, R3, R5, R6, R10, R15} ; pop values off the stack into the listed registers at the end of the subroutine
+;
+; R11 holds a 16-bit random number via a pseudo-random sequence as per the Linear feedback shift register (Fibonacci) on WikiPedia
+; R11 holds a non-zero 16-bit number.  If a zero is fed in the pseudo-random sequence will stay stuck at 0
+; Take as many bits of R11 as you need.  If you take the lowest 4 bits then you get a number between 1 and 15.
+;   If you take bits 5..1 you'll get a number between 0 and 15 (assuming you right shift by 1 bit).
+;
+; R11 MUST be initialized to a non-zero 16-bit value at the start of the program OR ELSE!
+; R11 can be read anywhere in the code but must only be written to by this subroutine
+
+RandomNum		STMFD		R13!,{R1, R2, R3, R4, R14}
+
+				AND			R1, R11, #0x8000
+				AND			R2, R11, #0x2000
+				LSL			R2, #2
+				EOR			R3, R1, R2
+				AND			R1, R11, #0x1000
+				LSL			R1, #3
+				EOR			R3, R3, R1
+				AND			R1, R11, #0x0400
+				LSL			R1, #5
+				EOR			R3, R3, R1		; the new bit to go into the LSB is present
+				LSR			R3, #15
+				LSL			R11, #1
+				ORR			R11, R11, R3
+				
+				; store 9 and 10000 into registers to use for the scaling calculation
+				MOV 		R1, #9  		
+				MOV			R2, #10000
+			
+				UDIV		R4, R11, R1		; divide the random R11 value by 9, discarding the remainder 
+				MUL 		R4, R4, R1		; multiply the quotient by 9
+				SUB			R4, R11, R4		; subtract the result from R11 to get the remainder (R11 mod 9) between 0 and 8
+				ADD			R4, #2			; add 2 to get a number between 2-10
+				MUL			R11, R4, R2		; multiply by 10k to get 20k to 100k -> number of loops to delay 0.1 ms for
+				
+				
+				BL 			DELAY 			; call the delay subroutine
+				
+				LDMFD		R13!,{R1, R2, R3, R4, R15}
+
+;
+;		Delay 0.1ms (100us) * R0 times
+; 		aim for better than 10% accuracy
+;               The formula to determine the number of loop cycles is equal to Clock speed x Delay time / (#clock cycles)
+;               where clock speed = 4MHz and if you use the BNE or other conditional branch command, the #clock cycles =
+;               2 if you take the branch, and 1 if you don't.
+
+DELAY			STMFD		R13!,{R1, R2, R11, R14}
+		;
+		; code to generate a delay of 0.1mS * R0 times
+		;
+		
+			MOV			R1, R11 		; Store the random R11 value in R1 to use as the delay counter
+			
+MULTI_DELAY		TEQ 		R1, #0 		; If the counter = 0, we are done delaying 
+			BEQ 		exitDelay		; ^ We are ready to turn the LED on 
+			SUB			R1, #1			;If not done delaying, decrement the counter so we can loop again and delay for 0.1 ms
+		
+			MOV 		R0, #0X0085     ; Initialize lower word/four bits of R0 for countdown 
+
+DELAY_COUNT	SUBS 		R0, #1 			; Decrement R0 by 1 and set the N,Z,C status bits
+		
+			BNE 		DELAY_COUNT ; check if the operation in the previous line (value in R0-1) equals 0, and if not equal to zero then we branch back to the label 'delay' (which decrements R0 again)
+									; once R0-1 = 0 we do not branch and continue to the next line; this is when the delay is fulfilled 
+
+			B 		MULTI_DELAY 	; Once we have delayed 0.1 ms we branch back to the beginning of the loop to check if we need to keep delaying
+		
+		
+exitDelay		MOV 		R3, #0x90000000		; Turn on LED 1.29 by writing a 0 in the bit 29  and 1 in bits 28 and 31 to port 1
+				STR 		R3, [r10, #0x20]	
+				
+				BL 			REFLEXCOUNTER 		; Once the LED is on, start counting reaction time 
+			
+				LDMFD		R13!,{R1, R2, R11, R15}
+				
+REFLEXCOUNTER	STMFD		R13!, {R1, R3, R14}
+
+				MOV			R2, #0 				; initialize the counter for reaction time 
+				
+POLL			LDR			R3, =INTO_ADDR		; poll the push button to check if it has been pushed 
+				LDR 		R1, [R3]
+				TST			R1, #0x00000400		; checks if bit 10 = 0 by ANDing with 0x400
+				
+				BEQ 		DISPLAY_NUM			; If bit 10 = 0, the button is pressed and we call the subroutine to display reaction time
+				
+				
+				MOV 		R0, #0X0085			; Initialize lower word/four bits of R0 for countdown 
+REFLEX_COUNT	SUBS 		R0, #1 				; Decrement R0 by 1 and set the N,Z,C status bits
+		
+				BNE 		REFLEX_COUNT		; If we are done delaying for  0.1 ms, we continue. if not we continue to delay 
+				
+				ADD			R2, #1 				; Increment reaction counter by 1 after every 0.1 ms
+				
+				B 			POLL ; poll the button again
+
+				LDMFD		R13!,{R1, R3, R15}
+
+; Part 1: simple counter counting from 0 to 255, then repeat
+COUNTER			STMFD		R13!, {R2,R3,R14} 	
+				MOV			R2, #0				; Initialize counter from 0 to 255 to 0
+NUMBER			MOV			R1, R2				; Store counter in R1 
+				EOR			R1, #0xFF			; Flip all the bits in the number because the LEDS are active low (0 = turn on) 
+				RBIT		R1, R1				; Reverse the order of bits in the number so we can correctly display them on the board ( the leftmost LED for each port is the least significant of the bits for the port leds, but we want to display the most significant bit of the number, so we reverse the bits). 
+				LSR			R1, #24				; Shift the reversed value right 24 bits so the 8 bits we want are in the least significant 2 bytes again 
+				BFI			R3, R1, #28, #2		; Take the first two bits of R1 and store them in bit 28 and 29 of R3 (for LEDS 1.28 and 1.29)
+				LSR			R1, #2				; Shift right twice to discard the two already inserted bits ^
+				BFI			R3, R1, #31, #1		; Take the new first bit of R1 (the 3rd digit) and store it into bit 31 of R3 (for  LED 1.31)
+				STR 		R3, [r10, #0x20]	; Write R3 to port 1 to turn on/off the 3 port 1 LEDs to display the 3 most significant bits of the number
+				
+				LSR			R1, #1				; Shift right once to discard the bit we just inserted to R3
+				BFI		    R3,	R1, #2, #5		; Take the new first five bits of R1 and store them in bits 2 to 6 of R3 (for LEDS 2.2 to 2.6)
+				STR 		R3, [R10, #0x40]	; Write R3 to port 2 to turn on/off the five port 2 LEDS to display the 5 leftover bits of the number
+	     		MOV 		R0, #0X08D5			; Initialize lower word/four bits of R0 for countdown 
+				MOVT 		R0, #0x0002 		; Initialize R0 upper word/four bits for countdown 
+
+DECREMENT		SUBS 		R0, #1 			; Decrement R0 by 1 and set the N,Z,C status bits
+		
+				BNE 		DECREMENT		; If we are done delaying for 100ms, we continue. if not we continue to delay 
+				
+				ADD			R2, #1			; Increment the counter
+				CMP			R2, #256		; If we have counted up to 256, we do not display 256 and reset the counter to 0 (which is displayed)
+				
+				BEQ			COUNTER 		
+				B			NUMBER		; Otherwise we display the new number and continue looping
+
+				LDMFD		R13!, {R2,R3,R15}
+				
+LED_BASE_ADR	EQU 	0x2009c000 		; Base address of the memory that controls the LEDs 
+PINSEL3			EQU 	0x4002c00c 		; Address of Pin Select Register 3 for P1[31:16]
+PINSEL4			EQU 	0x4002c010 		; Address of Pin Select Register 4 for P2[15:0]
+INTO_ADDR		EQU		0x2009C054		; Address of FIO2PIN register to poll INTO push button
+;	Usefull GPIO Registers
+;	FIODIR  - register to set individual pins as input or output
+;	FIOPIN  - register to read and write pins
+;	FIOSET  - register to set I/O pins to 1 by writing a 1
+;	FIOCLR  - register to clr I/O pins to 0 by writing a 1
+
+				ALIGN 
+
+				END 
+
+; 1. 8 bits counts from 0 to 255 (2^8 - 1), so we can deplay 256 times: 256*0.1ms = 0.0256 seconds. 
+	;16 bits counts from 0 to 65535 (2^16 - 1), so we can deplay 65536 times: 65536*0.1ms = 6.5536 seconds. 
+	;24 bits counts from 0 to 16777215 (2^24 - 1), so we can deplay 16777216 times: 16777216*0.1 ms = 1677.7216  seconds. 
+	;32 bits counts from 0 to 4294967295 (2^32 - 1), so we can deplay 4294967296 times: 4294967296*0.1 ms = 429496.7296 seconds. 
+
+; 2. 16 bits would be the best size (up to around 6.5 seconds), based on average response time. 0.0256 would be too short, and 24 bits and above would have too long of a time period to be necessary. 
+
+; 3. The random value in R11 specifies the number of times to run the delay loop. To scale this number we first take the remainder of R11/9 to get a value between 0 and 8, add 2 to get a value between 
+; 2 and 10, then multiply by 10 thousand to get a value between 20k and 100k. Each delay should be for 0.1 ms, so the number of loops we need to run for each delay = (clock speed * 0.1 ms delay)/number of clock cycles per loop. 
+; We run this delay loop anywhere between 20k to 100k times, to get 20k * 0.1 ms = 2 seconds to 100k * 0.1 ms = 10s. 
+; Our delay function has 3 clock cycles per loop (2 for the branch and 1 for decrementing the counter), so we have 4x10^6 s * 10^-4 s / 3 cycles = 133 loops  (rounded) for each 0.1 ms delay. The actual time delay with 133 loops is 133*3/ 4x10^6 s = 0.09975 ms 
+; For the low end of the range (2s delay), we have 20 000*0.09975 ms = 1.995 seconds. The error is 1- 1.995/2 * 100% = 0.25%. 
+;For the high end (10s delay), we have 100 000 * 0.09975 ms = 9.975 seconds. The error is 1 - 9.975/10 * 100% = 0.25%. 
+; The error for both ends of the range and thus all values in the range is within 5%. 
